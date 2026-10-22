@@ -31,8 +31,6 @@ export function MermaidTool() {
     const token = ++renderTokenRef.current
     const trimmed = code.trim()
     if (!trimmed) {
-      setSvg('')
-      setError(null)
       return
     }
     const handle = setTimeout(async () => {
@@ -102,7 +100,9 @@ export function MermaidTool() {
             <span className="text-sm font-medium text-white">Preview</span>
           </div>
           <div className="flex-1 min-h-0 bg-[#0f0f23] p-4 overflow-auto flex items-center justify-center" style={{ minHeight: 400 }}>
-            {error ? (
+            {!code.trim() ? (
+              <p className="text-sm text-[#9ca3af]">Type Mermaid syntax to see a preview.</p>
+            ) : error ? (
               <pre className="max-h-full max-w-full overflow-auto p-3 text-xs text-[#e94560] bg-[#1a1a2e] rounded border border-[#e94560]/30">
                 {error}
               </pre>

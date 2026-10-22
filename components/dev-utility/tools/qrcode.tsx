@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useCallback, useRef } from 'react'
-import { toCanvas } from 'qrcode'
+import { toCanvas, toString } from 'qrcode'
 
 type CenterType = 'none' | 'logo' | 'text' | 'both'
 
@@ -45,6 +45,18 @@ const FONTS = [
   'Times New Roman',
   'Courier New',
 ]
+
+const SVG_ENTITIES: Record<string, string> = {
+  '&': '&amp;',
+  '<': '&lt;',
+  '>': '&gt;',
+  '"': '&quot;',
+  "'": '&apos;',
+}
+
+function escapeSvg(value: string) {
+  return value.replace(/[&<>"']/g, (character) => SVG_ENTITIES[character])
+}
 
 export function QrCodeTool() {
   const [input, setInput] = useState('')
@@ -186,7 +198,14 @@ export function QrCodeTool() {
       setQrDataUrl(finalDataUrl)
 
       if (format === 'svg') {
-        let svgContent = `<svg xmlns="http://www.w3.org/2000/svg" width="${canvas.width}" height="${canvas.height}" viewBox="0 0 ${canvas.width} ${canvas.height}">`
+        const svgContent = await toString(input, {
+          type: 'svg',
+          width: options.width,
+          margin: options.margin,
+          errorCorrectionLevel: ecLevel,
+          color: options.color,
+        })
+        let overlay = ''
 
         if (hasCenterContent) {
           const qrSize = canvas.width
@@ -201,26 +220,24 @@ export function QrCodeTool() {
             const textBgWidth = qrSize * 0.5
             const textBgX = (qrSize - textBgWidth) / 2
 
-            svgContent += `<rect x="${textBgX}" y="${textBgY}" width="${textBgWidth}" height="${textBgHeight}" fill="${textOptions.bgColor}"/>`
-            svgContent += `<text x="${qrSize / 2}" y="${textBgY + textBgHeight / 2}" font-family="${textOptions.fontFamily}, sans-serif" font-size="${textOptions.fontSize}" fill="${textOptions.color}" text-anchor="middle" dominant-baseline="middle">${textOptions.text}</text>`
+            overlay += `<rect x="${textBgX}" y="${textBgY}" width="${textBgWidth}" height="${textBgHeight}" fill="${escapeSvg(textOptions.bgColor)}"/>`
+            overlay += `<text x="${qrSize / 2}" y="${textBgY + textBgHeight / 2}" font-family="${escapeSvg(textOptions.fontFamily)}, sans-serif" font-size="${textOptions.fontSize}" fill="${escapeSvg(textOptions.color)}" text-anchor="middle" dominant-baseline="middle">${escapeSvg(textOptions.text)}</text>`
           }
 
           if (showLogo && logoPreview) {
             const logoY = centerY
             const logoX = (qrSize - logoSize) / 2
 
-            svgContent += `<rect x="${logoX - logo.padding}" y="${logoY - logo.padding}" width="${logoSize + logo.padding * 2}" height="${logoSize + logo.padding * 2}" fill="${logo.bgColor}"/>`
-            svgContent += `<image href="${logoPreview}" x="${logoX}" y="${logoY}" width="${logoSize}" height="${logoSize}"/>`
+            overlay += `<rect x="${logoX - logo.padding}" y="${logoY - logo.padding}" width="${logoSize + logo.padding * 2}" height="${logoSize + logo.padding * 2}" fill="${escapeSvg(logo.bgColor)}"/>`
+            overlay += `<image href="${escapeSvg(logoPreview)}" x="${logoX}" y="${logoY}" width="${logoSize}" height="${logoSize}"/>`
           }
         }
 
-        svgContent += `</svg>`
-        setSvgString(svgContent)
+        setSvgString(svgContent.replace('</svg>', `${overlay}</svg>`))
       } else {
         setSvgString('')
       }
-    } catch (err) {
-      console.error(err)
+    } catch {
       setError('Failed to generate QR code')
     }
   }, [input, format, options, hasCenterContent, showLogo, showText, logoPreview, logo, textOptions, drawCenterContent])
@@ -418,7 +435,11 @@ export function QrCodeTool() {
           </div>
 
           <div className="flex items-center justify-center min-h-[200px] bg-white rounded-lg p-4">
-            {qrDataUrl && format === 'dataUrl' ? (
+            {error ? (
+              <span className="text-[#e94560] text-sm">{error}</span>
+            ) : qrDataUrl && format === 'dataUrl' ? (
+              // The source is an in-memory data URL produced by this component, not a remote image.
+              // eslint-disable-next-line @next/next/no-img-element
               <img src={qrDataUrl} alt="QR Code" className="max-w-full" />
             ) : svgString && format === 'svg' ? (
               <div dangerouslySetInnerHTML={{ __html: svgString }} className="max-w-full [&>svg]:max-w-full" />
