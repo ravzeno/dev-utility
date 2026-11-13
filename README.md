@@ -6,7 +6,7 @@ A browser-based collection of everyday developer utilities. The app is built wit
 
 - Converters: Base64, URL encode/escape, case conversion, timestamps, JSON/YAML/CSV, colours, string escaping, HTML entities, and Unix permissions
 - Generators: UUIDs, Lorem Ipsum, hashes, QR codes, and Mermaid diagrams
-- Inspectors and helpers: JSON editor, JWT decoder, regex tester, HTTP status reference, Docker CLI ↔ Compose converter, and cron expression builder
+- Inspectors and helpers: JSON editor, JWT decoder, regex tester, text diff, number base converter, HTTP status reference, Docker CLI ↔ Compose converter, and cron expression builder
 
 ## Prerequisites
 

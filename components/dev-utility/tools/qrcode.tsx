@@ -17,8 +17,6 @@ interface CenterTextOptions {
 interface LogoOptions {
   url: string
   size: number
-  bgColor: string
-  padding: number
 }
 
 interface QRCodeOptions {
@@ -66,6 +64,8 @@ export function QrCodeTool() {
   const [error, setError] = useState<string | null>(null)
   const [logoError, setLogoError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  const [generatedSettings, setGeneratedSettings] = useState('')
+  const [generating, setGenerating] = useState(false)
   const [logoPreview, setLogoPreview] = useState<string | null>(null)
   const [centerType, setCenterType] = useState<CenterType>('logo')
   const [textOptions, setTextOptions] = useState<CenterTextOptions>({
@@ -80,7 +80,7 @@ export function QrCodeTool() {
 
   const [options, setOptions] = useState<QRCodeOptions>({
     width: 256,
-    margin: 2,
+    margin: 4,
     errorCorrectionLevel: 'M',
     color: { dark: '#000000', light: '#FFFFFF' },
   })
@@ -88,8 +88,6 @@ export function QrCodeTool() {
   const [logo, setLogo] = useState<LogoOptions>({
     url: '',
     size: 20,
-    bgColor: '#FFFFFF',
-    padding: 4,
   })
 
   const [downloadFormat, setDownloadFormat] = useState<DownloadFormat>('png')
@@ -97,9 +95,11 @@ export function QrCodeTool() {
   const hasCenterContent = centerType !== 'none'
   const showLogo = centerType === 'logo' || centerType === 'both'
   const showText = centerType === 'text' || centerType === 'both'
+  const currentSettings = JSON.stringify({ input, options, centerType, logoPreview, logo, textOptions })
+  const isOutdated = Boolean(generatedSettings && generatedSettings !== currentSettings)
 
   const drawCenterContent = useCallback(async (ctx: CanvasRenderingContext2D, qrSize: number) => {
-    if (!hasCenterContent) return
+    if (!hasCenterContent) return null
 
     const logoSize = showLogo && logoPreview ? (qrSize * logo.size) / 100 : 0
     const textHeight = showText && textOptions.text ? textOptions.fontSize + textOptions.padding * 2 : 0
@@ -126,32 +126,19 @@ export function QrCodeTool() {
       const logoY = centerY
       const logoX = (qrSize - logoSize) / 2
 
-      ctx.fillStyle = logo.bgColor
-      ctx.fillRect(
-        logoX - logo.padding,
-        logoY - logo.padding,
-        logoSize + logo.padding * 2,
-        logoSize + logo.padding * 2
-      )
+      let imgSrc = logoPreview
 
-      try {
-        let imgSrc = logoPreview
-
-        if (!logoPreview.startsWith('data:')) {
-          try {
-            const response = await fetch(logoPreview)
-            if (response.ok) {
-              const blob = await response.blob()
-              imgSrc = await new Promise<string>((resolve) => {
-                const reader = new FileReader()
-                reader.onload = () => resolve(reader.result as string)
-                reader.readAsDataURL(blob)
-              })
-            }
-          } catch {
-            imgSrc = logoPreview
-          }
-        }
+      if (!logoPreview.startsWith('data:')) {
+        const response = await fetch(logoPreview)
+        if (!response.ok) throw new Error('Failed to load image')
+        const blob = await response.blob()
+        imgSrc = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader()
+          reader.onload = () => resolve(reader.result as string)
+          reader.onerror = () => reject(new Error('Failed to read image'))
+          reader.readAsDataURL(blob)
+        })
+      }
 
         const img = new Image()
         await new Promise<void>((resolve, reject) => {
@@ -161,11 +148,9 @@ export function QrCodeTool() {
         })
 
         ctx.drawImage(img, logoX, logoY, logoSize, logoSize)
-        setLogoError(null)
-      } catch {
-        setLogoError('Failed to load logo image. Skipping logo.')
-      }
+      return imgSrc
     }
+    return null
   }, [hasCenterContent, showLogo, showText, logoPreview, logo, textOptions])
 
   const generateQRCode = useCallback(async () => {
@@ -175,6 +160,8 @@ export function QrCodeTool() {
     }
 
     setError(null)
+    setLogoError(null)
+    setGenerating(true)
 
     try {
       const canvas = document.createElement('canvas')
@@ -189,15 +176,16 @@ export function QrCodeTool() {
       let finalDataUrl = canvas.toDataURL('image/png')
 
       const ctx = canvas.getContext('2d')
+      let embeddedLogo: string | null = null
       if (ctx && hasCenterContent) {
         const qrSize = canvas.width
-        await drawCenterContent(ctx, qrSize)
+        embeddedLogo = await drawCenterContent(ctx, qrSize)
         finalDataUrl = canvas.toDataURL('image/png')
       }
 
       setQrDataUrl(finalDataUrl)
 
-      if (format === 'svg') {
+      {
         const svgContent = await toString(input, {
           type: 'svg',
           width: options.width,
@@ -224,23 +212,25 @@ export function QrCodeTool() {
             overlay += `<text x="${qrSize / 2}" y="${textBgY + textBgHeight / 2}" font-family="${escapeSvg(textOptions.fontFamily)}, sans-serif" font-size="${textOptions.fontSize}" fill="${escapeSvg(textOptions.color)}" text-anchor="middle" dominant-baseline="middle">${escapeSvg(textOptions.text)}</text>`
           }
 
-          if (showLogo && logoPreview) {
+          if (showLogo && embeddedLogo) {
             const logoY = centerY
             const logoX = (qrSize - logoSize) / 2
 
-            overlay += `<rect x="${logoX - logo.padding}" y="${logoY - logo.padding}" width="${logoSize + logo.padding * 2}" height="${logoSize + logo.padding * 2}" fill="${escapeSvg(logo.bgColor)}"/>`
-            overlay += `<image href="${escapeSvg(logoPreview)}" x="${logoX}" y="${logoY}" width="${logoSize}" height="${logoSize}"/>`
+            overlay += `<image href="${escapeSvg(embeddedLogo)}" x="${logoX}" y="${logoY}" width="${logoSize}" height="${logoSize}"/>`
           }
         }
 
-        setSvgString(svgContent.replace('</svg>', `${overlay}</svg>`))
-      } else {
-        setSvgString('')
+        const viewBoxWidth = Number(svgContent.match(/viewBox="0 0 ([\d.]+)/)?.[1])
+        if (!viewBoxWidth) throw new Error('Invalid QR SVG')
+        setSvgString(svgContent.replace('</svg>', `<g transform="scale(${viewBoxWidth / canvas.width})">${overlay}</g></svg>`))
       }
+      setGeneratedSettings(currentSettings)
     } catch {
-      setError('Failed to generate QR code')
+      setError('Could not generate the QR code. Check the image URL or upload an image, then try again.')
+    } finally {
+      setGenerating(false)
     }
-  }, [input, format, options, hasCenterContent, showLogo, showText, logoPreview, logo, textOptions, drawCenterContent])
+  }, [input, options, hasCenterContent, showLogo, showText, logoPreview, logo, textOptions, drawCenterContent, currentSettings])
 
   const handleLogoUrlChange = useCallback((url: string) => {
     setLogo({ ...logo, url })
@@ -299,6 +289,7 @@ export function QrCodeTool() {
     setInput('')
     setQrDataUrl('')
     setSvgString('')
+    setGeneratedSettings('')
     setError(null)
     setLogoError(null)
     setLogoPreview(null)
@@ -306,8 +297,6 @@ export function QrCodeTool() {
     setLogo({
       url: '',
       size: 20,
-      bgColor: '#FFFFFF',
-      padding: 4,
     })
     setTextOptions({
       text: '',
@@ -319,80 +308,98 @@ export function QrCodeTool() {
     })
   }, [])
 
-  const previewContent = qrDataUrl || (svgString && format === 'svg' ? svgString : null)
+  const previewContent = !isOutdated && !generating ? (format === 'dataUrl' ? qrDataUrl : svgString) : ''
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="p-4 bg-[#0f0f23] border-2 border-[#2d2d44] rounded-lg space-y-4">
-          <h3 className="text-sm text-[#9ca3af] font-medium">Input</h3>
+      <div className="grid grid-cols-1 gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(270px,0.8fr)] lg:gap-10">
+        <div className="space-y-5">
+          <div><h3 className="text-base font-semibold text-[var(--foreground)]">Content</h3><p className="mt-1 text-sm text-[var(--muted)]">Enter the link or text people will open when they scan.</p></div>
 
           <div>
-            <label className="block text-xs text-[#9ca3af] mb-1">Text or URL</label>
+            <label htmlFor="qr-input" className="mb-2 block text-sm font-medium text-[var(--foreground)]">Text or URL</label>
             <textarea
+              id="qr-input"
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder="Enter text or URL..."
-              className="w-full h-24 p-2.5 bg-[#1a1a2e] border-2 border-[#2d2d44] rounded-lg text-white font-mono text-sm focus:outline-none focus:border-[#e94560] placeholder:text-[#4a4a5a] resize-none"
+              className="min-h-28 w-full resize-y rounded-md border border-[var(--border)] bg-[var(--surface-raised)] p-3 font-mono text-sm text-[var(--foreground)] focus:border-[var(--primary)]"
             />
           </div>
 
+          <button
+            type="button"
+            onClick={generateQRCode}
+            disabled={generating}
+            className="rounded-md bg-[var(--primary)] px-5 py-2.5 text-sm font-semibold text-[var(--primary-foreground)] hover:opacity-90 disabled:cursor-wait disabled:opacity-60"
+          >
+            {generating ? 'Generating…' : isOutdated ? 'Update QR code' : 'Generate QR code'}
+          </button>
+
+          <details className="group border-t border-[var(--border)] pt-4">
+            <summary className="cursor-pointer text-sm font-medium text-[var(--foreground)]">QR settings</summary>
+            <div className="mt-4 space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs text-[#9ca3af] mb-1">Width (px)</label>
+              <label htmlFor="qr-width" className="block text-xs text-[var(--muted)] mb-1">Width (px)</label>
               <input
+                id="qr-width"
                 type="number"
                 value={options.width}
                 onChange={(e) => setOptions({ ...options, width: parseInt(e.target.value) || 256 })}
                 min={64}
                 max={512}
-                className="w-full p-2 bg-[#1a1a2e] border-2 border-[#2d2d44] rounded-lg text-white font-mono text-sm focus:outline-none focus:border-[#e94560]"
+                className="w-full p-2 bg-[var(--surface-raised)] border-2 border-[var(--border)] rounded-lg text-white font-mono text-sm focus:outline-none focus:border-[var(--primary)]"
               />
             </div>
             <div>
-              <label className="block text-xs text-[#9ca3af] mb-1">Margin</label>
+              <label htmlFor="qr-margin" className="block text-xs text-[var(--muted)] mb-1">Margin</label>
               <input
+                id="qr-margin"
                 type="number"
                 value={options.margin}
                 onChange={(e) => setOptions({ ...options, margin: parseInt(e.target.value) || 0 })}
                 min={0}
                 max={10}
-                className="w-full p-2 bg-[#1a1a2e] border-2 border-[#2d2d44] rounded-lg text-white font-mono text-sm focus:outline-none focus:border-[#e94560]"
+                className="w-full p-2 bg-[var(--surface-raised)] border-2 border-[var(--border)] rounded-lg text-white font-mono text-sm focus:outline-none focus:border-[var(--primary)]"
               />
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs text-[#9ca3af] mb-1">Dark Color</label>
+              <label htmlFor="qr-dark" className="block text-xs text-[var(--muted)] mb-1">Dark Color</label>
               <input
+                id="qr-dark"
                 type="color"
                 value={options.color.dark}
                 onChange={(e) => setOptions({ ...options, color: { ...options.color, dark: e.target.value } })}
-                className="w-full h-10 bg-[#1a1a2e] border-2 border-[#2d2d44] rounded-lg cursor-pointer"
+                className="w-full h-10 bg-[var(--surface-raised)] border-2 border-[var(--border)] rounded-lg cursor-pointer"
               />
             </div>
             <div>
-              <label className="block text-xs text-[#9ca3af] mb-1">Light Color</label>
+              <label htmlFor="qr-light" className="block text-xs text-[var(--muted)] mb-1">Light Color</label>
               <input
+                id="qr-light"
                 type="color"
                 value={options.color.light}
                 onChange={(e) => setOptions({ ...options, color: { ...options.color, light: e.target.value } })}
-                className="w-full h-10 bg-[#1a1a2e] border-2 border-[#2d2d44] rounded-lg cursor-pointer"
+                className="w-full h-10 bg-[var(--surface-raised)] border-2 border-[var(--border)] rounded-lg cursor-pointer"
               />
             </div>
           </div>
 
           <div>
-            <label className="block text-xs text-[#9ca3af] mb-1">
+            <label htmlFor="qr-correction" className="block text-xs text-[var(--muted)] mb-1">
               Error Correction
-              {hasCenterContent && <span className="text-[#e94560] ml-1">(Auto: H)</span>}
+              {hasCenterContent && <span className="text-[var(--primary)] ml-1">(Auto: H)</span>}
             </label>
             <select
+              id="qr-correction"
               value={options.errorCorrectionLevel}
               onChange={(e) => setOptions({ ...options, errorCorrectionLevel: e.target.value as 'L' | 'M' | 'Q' | 'H' })}
               disabled={hasCenterContent}
-              className="w-full p-2 bg-[#1a1a2e] border-2 border-[#2d2d44] rounded-lg text-white text-sm focus:outline-none focus:border-[#e94560] disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full p-2 bg-[var(--surface-raised)] border-2 border-[var(--border)] rounded-lg text-white text-sm focus:outline-none focus:border-[var(--primary)] disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <option value="L">L (7%) - Low</option>
               <option value="M">M (15%) - Medium</option>
@@ -402,41 +409,32 @@ export function QrCodeTool() {
           </div>
 
           <div>
-            <label className="block text-xs text-[#9ca3af] mb-1">Output Format</label>
+            <label htmlFor="qr-format" className="block text-xs text-[var(--muted)] mb-1">Copy format</label>
             <select
+              id="qr-format"
               value={format}
               onChange={(e) => setFormat(e.target.value as OutputFormat)}
-              className="w-full p-2 bg-[#1a1a2e] border-2 border-[#2d2d44] rounded-lg text-white text-sm focus:outline-none focus:border-[#e94560]"
+              className="w-full p-2 bg-[var(--surface-raised)] border-2 border-[var(--border)] rounded-lg text-white text-sm focus:outline-none focus:border-[var(--primary)]"
             >
               <option value="dataUrl">Data URL (Base64)</option>
               <option value="svg">SVG String</option>
             </select>
           </div>
+            </div>
+          </details>
         </div>
 
-        <div className="p-4 bg-[#0f0f23] border-2 border-[#2d2d44] rounded-lg space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm text-[#9ca3af] font-medium">Preview</h3>
-            <div className="flex gap-2">
-              <button
-                onClick={generateQRCode}
-                className="px-3 py-1.5 bg-[#e94560] text-white text-xs font-medium rounded-lg hover:bg-[#d63a52] transition-all"
-              >
-                Generate
-              </button>
-              <button
-                onClick={handleCopy}
-                disabled={!previewContent}
-                className="px-3 py-1.5 bg-[#1a1a2e] text-[#9ca3af] text-xs font-medium rounded-lg border border-[#2d2d44] hover:text-white hover:border-[#e94560] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {copied ? '✓ Copied' : 'Copy'}
-              </button>
-            </div>
+        <div className="space-y-4 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4 sm:p-5">
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="text-sm font-semibold text-[var(--foreground)]">Preview</h3>
+            <span className="text-xs text-[var(--muted)]">{options.width} × {options.width} px</span>
           </div>
 
           <div className="flex items-center justify-center min-h-[200px] bg-white rounded-lg p-4">
             {error ? (
-              <span className="text-[#e94560] text-sm">{error}</span>
+              <span role="alert" className="text-sm text-red-800">{error}</span>
+            ) : isOutdated || generating ? (
+              <span className="text-center text-sm text-slate-600">{generating ? 'Generating QR code…' : 'Settings changed. Select Update QR code to refresh.'}</span>
             ) : qrDataUrl && format === 'dataUrl' ? (
               // The source is an in-memory data URL produced by this component, not a remote image.
               // eslint-disable-next-line @next/next/no-img-element
@@ -444,46 +442,56 @@ export function QrCodeTool() {
             ) : svgString && format === 'svg' ? (
               <div dangerouslySetInnerHTML={{ __html: svgString }} className="max-w-full [&>svg]:max-w-full" />
             ) : (
-              <span className="text-[#4a4a5a] text-sm">QR code will appear here</span>
+              <span className="text-sm text-slate-600">Your QR code will appear here</span>
             )}
           </div>
+          <p className="text-xs leading-relaxed text-[var(--muted)]">Test with a phone before sharing. Strong contrast and a smaller center image help scanning.</p>
 
-          {previewContent && (
-            <div className="flex items-center gap-2">
+          {previewContent && !error && (
+            <div className="flex flex-wrap items-center gap-2">
               <select
+                aria-label="Download format"
                 value={downloadFormat}
                 onChange={(e) => setDownloadFormat(e.target.value as DownloadFormat)}
-                className="flex-1 p-2 bg-[#1a1a2e] border-2 border-[#2d2d44] rounded-lg text-white text-xs focus:outline-none focus:border-[#e94560]"
+                className="flex-1 p-2 bg-[var(--surface-raised)] border-2 border-[var(--border)] rounded-lg text-white text-xs focus:outline-none focus:border-[var(--primary)]"
               >
                 <option value="png">PNG</option>
                 <option value="svg">SVG</option>
               </select>
               <button
                 onClick={handleDownload}
-                className="flex-1 px-3 py-2 bg-[#e94560] text-white text-xs font-medium rounded-lg hover:bg-[#d63a52] transition-all"
+                className="flex-1 rounded-md bg-[var(--primary)] px-3 py-2 text-xs font-semibold text-[var(--primary-foreground)] hover:opacity-90"
               >
                 Download {downloadFormat.toUpperCase()}
+              </button>
+              <button
+                type="button"
+                onClick={handleCopy}
+                className="rounded-md border border-[var(--border)] px-3 py-2 text-xs font-medium text-[var(--foreground)] hover:border-[var(--primary)]"
+              >
+                {copied ? 'Copied' : format === 'svg' ? 'Copy SVG' : 'Copy data URL'}
               </button>
             </div>
           )}
         </div>
       </div>
 
-      <div className="p-4 bg-[#0f0f23] border-2 border-[#2d2d44] rounded-lg">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-sm text-[#9ca3af] font-medium">Center Content</h3>
-          <div className="flex gap-2">
+      <div className="border-t border-[var(--border)] pt-5">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+          <div><h3 className="text-sm font-semibold text-[var(--foreground)]">Center content</h3><p className="mt-1 text-xs text-[var(--muted)]">Optionally add an image or label.</p></div>
+          <div className="flex flex-wrap gap-2">
             {(['none', 'logo', 'text', 'both'] as CenterType[]).map((type) => (
               <button
                 key={type}
                 onClick={() => handleCenterTypeChange(type)}
+                aria-pressed={centerType === type}
                 className={`px-3 py-1 text-xs font-medium rounded-lg transition-all ${
                   centerType === type
-                    ? 'bg-[#e94560] text-white'
-                    : 'bg-[#1a1a2e] text-[#9ca3af] border border-[#2d2d44] hover:text-white hover:border-[#e94560]'
+                    ? 'bg-[var(--primary)] text-[var(--primary-foreground)]'
+                    : 'bg-[var(--surface-raised)] text-[var(--muted)] border border-[var(--border)] hover:text-white hover:border-[var(--primary)]'
                 }`}
               >
-                {type.charAt(0).toUpperCase() + type.slice(1)}
+                {type === 'none' ? 'None' : type === 'logo' ? 'Image' : type === 'text' ? 'Text' : 'Image + text'}
               </button>
             ))}
           </div>
@@ -491,21 +499,22 @@ export function QrCodeTool() {
 
         {showLogo && (
           <div className="mb-4">
-            <h4 className="text-xs text-[#9ca3af] mb-3 pb-2 border-b border-[#2d2d44]">Logo</h4>
+            <h4 className="text-xs text-[var(--muted)] mb-3 pb-2 border-b border-[var(--border)]">Add an image without a border</h4>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <div className="space-y-1">
-                <label className="block text-xs text-[#9ca3af]">Image URL</label>
+                <label htmlFor="qr-logo-url" className="block text-xs text-[var(--muted)]">Image URL</label>
                 <input
+                  id="qr-logo-url"
                   type="text"
                   value={logo.url}
                   onChange={(e) => handleLogoUrlChange(e.target.value)}
                   placeholder="https://example.com/logo.png"
-                  className="w-full p-2 bg-[#1a1a2e] border-2 border-[#2d2d44] rounded-lg text-white text-xs focus:outline-none focus:border-[#e94560] placeholder:text-[#4a4a5a]"
+                  className="w-full p-2 bg-[var(--surface-raised)] border-2 border-[var(--border)] rounded-lg text-white text-xs focus:outline-none focus:border-[var(--primary)] placeholder:text-[var(--muted)]"
                 />
               </div>
 
               <div className="space-y-1">
-                <label className="block text-xs text-[#9ca3af]">Upload File</label>
+                <label className="block text-xs text-[var(--muted)]">Upload File</label>
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -515,59 +524,52 @@ export function QrCodeTool() {
                 />
                 <button
                   onClick={() => fileInputRef.current?.click()}
-                  className="w-full p-2 bg-[#1a1a2e] border-2 border-[#2d2d44] rounded-lg text-[#9ca3af] text-xs hover:text-white hover:border-[#e94560] transition-all text-left truncate"
+                  className="w-full p-2 bg-[var(--surface-raised)] border-2 border-[var(--border)] rounded-lg text-[var(--muted)] text-xs hover:text-white hover:border-[var(--primary)] transition-all text-left truncate"
                 >
                   {logoPreview && !logo.url ? '✓ File selected' : 'Choose file...'}
                 </button>
               </div>
 
               <div className="space-y-1">
-                <label className="block text-xs text-[#9ca3af]">Size ({logo.size}%)</label>
+                <label htmlFor="qr-logo-size" className="block text-xs text-[var(--muted)]">Size ({logo.size}%)</label>
                 <input
+                  id="qr-logo-size"
                   type="range"
                   min={5}
                   max={30}
                   value={logo.size}
                   onChange={(e) => setLogo({ ...logo, size: parseInt(e.target.value) })}
-                  className="w-full h-2 bg-[#1a1a2e] rounded-lg appearance-none cursor-pointer accent-[#e94560]"
+                  className="w-full h-2 bg-[var(--surface-raised)] rounded-lg appearance-none cursor-pointer accent-[var(--primary)]"
                 />
+                <p className="text-xs text-[var(--muted)]">Larger images can make the code harder to scan. Test before sharing.</p>
               </div>
 
-              <div className="space-y-1">
-                <label className="block text-xs text-[#9ca3af]">Bg Color</label>
-                <input
-                  type="color"
-                  value={logo.bgColor}
-                  onChange={(e) => setLogo({ ...logo, bgColor: e.target.value })}
-                  className="w-full h-8 bg-[#1a1a2e] border-2 border-[#2d2d44] rounded-lg cursor-pointer"
-                />
-              </div>
             </div>
           </div>
         )}
 
         {showText && (
           <div>
-            <h4 className="text-xs text-[#9ca3af] mb-3 pb-2 border-b border-[#2d2d44]">Text</h4>
+            <h4 className="text-xs text-[var(--muted)] mb-3 pb-2 border-b border-[var(--border)]">Text</h4>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
               <div className="space-y-1">
-                <label className="block text-xs text-[#9ca3af]">Text</label>
+                <label className="block text-xs text-[var(--muted)]">Text</label>
                 <input
                   type="text"
                   value={textOptions.text}
                   onChange={(e) => setTextOptions({ ...textOptions, text: e.target.value })}
                   placeholder="Your brand"
                   maxLength={20}
-                  className="w-full p-2 bg-[#1a1a2e] border-2 border-[#2d2d44] rounded-lg text-white text-xs focus:outline-none focus:border-[#e94560] placeholder:text-[#4a4a5a]"
+                  className="w-full p-2 bg-[var(--surface-raised)] border-2 border-[var(--border)] rounded-lg text-white text-xs focus:outline-none focus:border-[var(--primary)] placeholder:text-[var(--muted)]"
                 />
               </div>
 
               <div className="space-y-1">
-                <label className="block text-xs text-[#9ca3af]">Font</label>
+                <label className="block text-xs text-[var(--muted)]">Font</label>
                 <select
                   value={textOptions.fontFamily}
                   onChange={(e) => setTextOptions({ ...textOptions, fontFamily: e.target.value })}
-                  className="w-full p-2 bg-[#1a1a2e] border-2 border-[#2d2d44] rounded-lg text-white text-xs focus:outline-none focus:border-[#e94560]"
+                  className="w-full p-2 bg-[var(--surface-raised)] border-2 border-[var(--border)] rounded-lg text-white text-xs focus:outline-none focus:border-[var(--primary)]"
                 >
                   {FONTS.map((font) => (
                     <option key={font} value={font}>{font}</option>
@@ -576,34 +578,34 @@ export function QrCodeTool() {
               </div>
 
               <div className="space-y-1">
-                <label className="block text-xs text-[#9ca3af]">Size ({textOptions.fontSize}px)</label>
+                <label className="block text-xs text-[var(--muted)]">Size ({textOptions.fontSize}px)</label>
                 <input
                   type="range"
                   min={10}
                   max={32}
                   value={textOptions.fontSize}
                   onChange={(e) => setTextOptions({ ...textOptions, fontSize: parseInt(e.target.value) })}
-                  className="w-full h-2 bg-[#1a1a2e] rounded-lg appearance-none cursor-pointer accent-[#e94560]"
+                  className="w-full h-2 bg-[var(--surface-raised)] rounded-lg appearance-none cursor-pointer accent-[var(--primary)]"
                 />
               </div>
 
               <div className="space-y-1">
-                <label className="block text-xs text-[#9ca3af]">Text Color</label>
+                <label className="block text-xs text-[var(--muted)]">Text Color</label>
                 <input
                   type="color"
                   value={textOptions.color}
                   onChange={(e) => setTextOptions({ ...textOptions, color: e.target.value })}
-                  className="w-full h-8 bg-[#1a1a2e] border-2 border-[#2d2d44] rounded-lg cursor-pointer"
+                  className="w-full h-8 bg-[var(--surface-raised)] border-2 border-[var(--border)] rounded-lg cursor-pointer"
                 />
               </div>
 
               <div className="space-y-1">
-                <label className="block text-xs text-[#9ca3af]">Bg Color</label>
+                <label className="block text-xs text-[var(--muted)]">Bg Color</label>
                 <input
                   type="color"
                   value={textOptions.bgColor}
                   onChange={(e) => setTextOptions({ ...textOptions, bgColor: e.target.value })}
-                  className="w-full h-8 bg-[#1a1a2e] border-2 border-[#2d2d44] rounded-lg cursor-pointer"
+                  className="w-full h-8 bg-[var(--surface-raised)] border-2 border-[var(--border)] rounded-lg cursor-pointer"
                 />
               </div>
             </div>
@@ -615,10 +617,10 @@ export function QrCodeTool() {
         )}
       </div>
 
-      {svgString && format === 'svg' && (
-        <div className="p-4 bg-[#0f0f23] border-2 border-[#2d2d44] rounded-lg">
-          <h3 className="text-sm text-[#9ca3af] font-medium mb-2">SVG Output</h3>
-          <pre className="p-3 bg-[#1a1a2e] rounded-lg overflow-auto max-h-40 text-xs font-mono text-[#9ca3af]">
+      {svgString && format === 'svg' && !isOutdated && !generating && !error && (
+        <div className="p-4 bg-[var(--surface)] border-2 border-[var(--border)] rounded-lg">
+          <h3 className="text-sm text-[var(--muted)] font-medium mb-2">SVG Output</h3>
+          <pre className="p-3 bg-[var(--surface-raised)] rounded-lg overflow-auto max-h-40 text-xs font-mono text-[var(--muted)]">
             {svgString}
           </pre>
         </div>
@@ -627,7 +629,7 @@ export function QrCodeTool() {
       <div className="flex gap-3">
         <button
           onClick={handleClear}
-          className="px-4 py-2 bg-transparent text-[#9ca3af] rounded-lg font-medium border-2 border-[#2d2d44] hover:text-white hover:border-[#e94560] transition-all text-sm"
+          className="px-4 py-2 bg-transparent text-[var(--muted)] rounded-lg font-medium border-2 border-[var(--border)] hover:text-white hover:border-[var(--primary)] transition-all text-sm"
         >
           Clear
         </button>

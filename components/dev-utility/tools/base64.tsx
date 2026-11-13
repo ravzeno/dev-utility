@@ -1,46 +1,13 @@
 'use client'
 
-import { useState } from 'react'
+import { useTwoWayConverter } from './useTwoWayConverter'
 
 export function Base64Tool() {
-  const [input, setInput] = useState('')
-  const [output, setOutput] = useState('')
-  const [direction, setDirection] = useState<'encode' | 'decode'>('encode')
-  const [error, setError] = useState('')
-  const [copied, setCopied] = useState(false)
-
-  const convert = () => {
-    setError('')
-    try {
-      if (direction === 'encode') {
-        setOutput(btoa(unescape(encodeURIComponent(input))))
-      } else {
-        setOutput(decodeURIComponent(escape(atob(input))))
-      }
-    } catch {
-      setError('Invalid input for this operation')
-    }
-  }
-
-  const swap = () => {
-    setDirection((d) => (d === 'encode' ? 'decode' : 'encode'))
-    setInput(output)
-    setOutput(input)
-    setError('')
-  }
-
-  const copyToClipboard = async () => {
-    if (!output) return
-    await navigator.clipboard.writeText(output)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
-  }
-
-  const clear = () => {
-    setInput('')
-    setOutput('')
-    setError('')
-  }
+  const { input, setInput, output, direction, setDirection, error, setError, copied, convert, swap, copyToClipboard, clear } = useTwoWayConverter(
+    ['encode', 'decode'],
+    (value, mode) => mode === 'encode' ? btoa(unescape(encodeURIComponent(value))) : decodeURIComponent(escape(atob(value))),
+    'Invalid input for this operation',
+  )
 
   return (
     <div className="space-y-6">

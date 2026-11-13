@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useTwoWayConverter } from './useTwoWayConverter'
 
 const ENTITIES: Record<string, string> = {
   '&': '&amp;',
@@ -37,44 +37,11 @@ function decodeHtml(input: string): string {
 }
 
 export function HtmlEntitiesTool() {
-  const [input, setInput] = useState('')
-  const [output, setOutput] = useState('')
-  const [direction, setDirection] = useState<'encode' | 'decode'>('encode')
-  const [error, setError] = useState('')
-  const [copied, setCopied] = useState(false)
-
-  const convert = () => {
-    setError('')
-    try {
-      if (direction === 'encode') {
-        setOutput(encodeHtml(input))
-      } else {
-        setOutput(decodeHtml(input))
-      }
-    } catch {
-      setError('Invalid input for this operation')
-    }
-  }
-
-  const swap = () => {
-    setDirection((d) => (d === 'encode' ? 'decode' : 'encode'))
-    setInput(output)
-    setOutput(input)
-    setError('')
-  }
-
-  const copyToClipboard = async () => {
-    if (!output) return
-    await navigator.clipboard.writeText(output)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
-  }
-
-  const clear = () => {
-    setInput('')
-    setOutput('')
-    setError('')
-  }
+  const { input, setInput, output, direction, setDirection, error, setError, copied, convert, swap, copyToClipboard, clear } = useTwoWayConverter(
+    ['encode', 'decode'],
+    (value, mode) => mode === 'encode' ? encodeHtml(value) : decodeHtml(value),
+    'Invalid input for this operation',
+  )
 
   return (
     <div className="space-y-4">

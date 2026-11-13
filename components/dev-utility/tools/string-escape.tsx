@@ -1,46 +1,13 @@
 'use client'
 
-import { useState } from 'react'
+import { useTwoWayConverter } from './useTwoWayConverter'
 
 export function StringEscapeTool() {
-  const [input, setInput] = useState('')
-  const [output, setOutput] = useState('')
-  const [direction, setDirection] = useState<'escape' | 'unescape'>('escape')
-  const [error, setError] = useState('')
-  const [copied, setCopied] = useState(false)
-
-  const convert = () => {
-    setError('')
-    try {
-      if (direction === 'escape') {
-        setOutput(JSON.stringify(input).slice(1, -1))
-      } else {
-        setOutput(JSON.parse(`"${input}"`))
-      }
-    } catch {
-      setError('Invalid input — cannot unescape this string')
-    }
-  }
-
-  const swap = () => {
-    setDirection((d) => (d === 'escape' ? 'unescape' : 'escape'))
-    setInput(output)
-    setOutput(input)
-    setError('')
-  }
-
-  const copyToClipboard = async () => {
-    if (!output) return
-    await navigator.clipboard.writeText(output)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
-  }
-
-  const clear = () => {
-    setInput('')
-    setOutput('')
-    setError('')
-  }
+  const { input, setInput, output, direction, setDirection, error, setError, copied, convert, swap, copyToClipboard, clear } = useTwoWayConverter(
+    ['escape', 'unescape'],
+    (value, mode) => mode === 'escape' ? JSON.stringify(value).slice(1, -1) : JSON.parse(`"${value}"`),
+    'Invalid input — cannot unescape this string',
+  )
 
   return (
     <div className="space-y-4">

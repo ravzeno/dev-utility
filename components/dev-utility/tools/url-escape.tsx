@@ -1,46 +1,13 @@
 'use client'
 
-import { useState } from 'react'
+import { useTwoWayConverter } from './useTwoWayConverter'
 
 export function UrlEscapeTool() {
-  const [input, setInput] = useState('')
-  const [output, setOutput] = useState('')
-  const [direction, setDirection] = useState<'encode' | 'decode'>('encode')
-  const [error, setError] = useState('')
-  const [copied, setCopied] = useState(false)
-
-  const convert = () => {
-    setError('')
-    try {
-      if (direction === 'encode') {
-        setOutput(encodeURIComponent(input))
-      } else {
-        setOutput(decodeURIComponent(input))
-      }
-    } catch {
-      setError('Invalid input — cannot decode this string')
-    }
-  }
-
-  const swap = () => {
-    setDirection((d) => (d === 'encode' ? 'decode' : 'encode'))
-    setInput(output)
-    setOutput(input)
-    setError('')
-  }
-
-  const copyToClipboard = async () => {
-    if (!output) return
-    await navigator.clipboard.writeText(output)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
-  }
-
-  const clear = () => {
-    setInput('')
-    setOutput('')
-    setError('')
-  }
+  const { input, setInput, output, direction, setDirection, error, setError, copied, convert, swap, copyToClipboard, clear } = useTwoWayConverter(
+    ['encode', 'decode'],
+    (value, mode) => mode === 'encode' ? encodeURIComponent(value) : decodeURIComponent(value),
+    'Invalid input — cannot decode this string',
+  )
 
   return (
     <div className="space-y-4">

@@ -20,6 +20,8 @@ import { DockerComposeTool } from './docker-compose'
 import { CronBuilderTool } from './cron-builder'
 import { MermaidTool } from './mermaid'
 import { QrCodeTool } from './qrcode'
+import { NumberBaseTool } from './number-base'
+import { TextDiffTool } from './text-diff'
 
 export const tools: ToolRegistryItem[] = [
   {
@@ -210,5 +212,23 @@ export const tools: ToolRegistryItem[] = [
     type: 'generator',
     component: <QrCodeTool />,
     keywords: ['qr', 'qrcode', 'code', 'generate', 'barcode', 'scan'],
+  },
+  {
+    id: 'text-diff',
+    name: 'Text Diff',
+    description: 'Compare two texts and see added and removed lines',
+    category: 'Converter',
+    type: 'freestyle',
+    component: <TextDiffTool />,
+    keywords: ['diff', 'compare', 'text', 'lines', 'changes'],
+  },
+  {
+    id: 'number-base',
+    name: 'Number Base',
+    description: 'Convert integers between binary, octal, decimal and hexadecimal',
+    category: 'Converter',
+    type: 'n-way',
+    component: <NumberBaseTool />,
+    keywords: ['number', 'base', 'binary', 'octal', 'decimal', 'hex', 'hexadecimal'],
   },
 ]

@@ -5,6 +5,7 @@ import { tools } from './tools'
 import { useFavorites } from './tools/useFavorites'
 import { useActiveTool } from './tools/useActiveTool'
 import { Search, Star, X, Menu, ArrowLeftRight, Braces, Boxes, Sparkles } from 'lucide-react'
+import type { ToolRegistryItem } from './tools/types'
 
 const NAVIGATION_GROUPS = [
   {
@@ -15,12 +16,12 @@ const NAVIGATION_GROUPS = [
   {
     label: 'ข้อความและข้อมูล',
     icon: Braces,
-    ids: ['case-converter', 'string-escape', 'html-entities', 'url-escape', 'regex', 'hash'],
+    ids: ['case-converter', 'string-escape', 'html-entities', 'url-escape', 'regex', 'hash', 'text-diff'],
   },
   {
     label: 'เครื่องมือระบบ',
     icon: Boxes,
-    ids: ['http-status', 'permission', 'docker-compose', 'cron-builder', 'mermaid'],
+    ids: ['http-status', 'permission', 'docker-compose', 'cron-builder', 'mermaid', 'number-base'],
   },
   {
     label: 'สร้างและอ้างอิง',
@@ -28,6 +29,41 @@ const NAVIGATION_GROUPS = [
     ids: ['uuid', 'qrcode', 'color-converter', 'lorem'],
   },
 ]
+
+function NavItem({ tool, compact = false, active, favorite, onSelect, onToggleFavorite }: {
+  tool: ToolRegistryItem
+  compact?: boolean
+  active: boolean
+  favorite: boolean
+  onSelect: (id: string) => void
+  onToggleFavorite: (id: string) => void
+}) {
+  return (
+    <div className="group/nav flex items-center">
+      <a
+        href={`?tool=${encodeURIComponent(tool.id)}`}
+        onClick={(event) => {
+          if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+          event.preventDefault()
+          onSelect(tool.id)
+        }}
+        aria-current={active ? 'page' : undefined}
+        className={`sidebar-tool ${active ? 'sidebar-tool-active' : ''} ${compact ? 'sidebar-tool-compact' : ''}`}
+      >
+        <span className="truncate">{tool.name}</span>
+      </a>
+      <button
+        type="button"
+        onClick={() => onToggleFavorite(tool.id)}
+        aria-label={favorite ? `Remove ${tool.name} from favorites` : `Add ${tool.name} to favorites`}
+        className={`favorite-toggle ${favorite ? 'favorite-toggle-active' : ''}`}
+        title={favorite ? 'Remove from favorites' : 'Add to favorites'}
+      >
+        <Star className={`size-3.5 ${favorite ? 'fill-current' : ''}`} />
+      </button>
+    </div>
+  )
+}
 
 export function Sidebar() {
   const { activeTool, setActiveTool } = useActiveTool()
@@ -38,12 +74,13 @@ export function Sidebar() {
 
   const favoriteTools = tools.filter((t) => favorites.includes(t.id))
 
-  const filteredTools = searchQuery
+  const normalizedQuery = searchQuery.toLowerCase()
+  const filteredTools = normalizedQuery
     ? tools.filter(
         (t) =>
-          t.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          t.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          t.keywords?.some((k) => k.includes(searchQuery.toLowerCase()))
+          t.name.toLowerCase().includes(normalizedQuery) ||
+          t.description?.toLowerCase().includes(normalizedQuery) ||
+          t.keywords?.some((k) => k.toLowerCase().includes(normalizedQuery))
       )
     : tools
 
@@ -80,29 +117,9 @@ export function Sidebar() {
     setSidebarOpen(false)
   }
 
-  const NavItem = ({ tool, compact = false }: { tool: (typeof tools)[number]; compact?: boolean }) => (
-    <div className="group/nav flex items-center">
-      <a
-        href={`?tool=${encodeURIComponent(tool.id)}`}
-        onClick={(event) => {
-          event.preventDefault()
-          handleSelectTool(tool.id)
-        }}
-        aria-current={activeTool === tool.id ? 'page' : undefined}
-        className={`sidebar-tool ${activeTool === tool.id ? 'sidebar-tool-active' : ''} ${compact ? 'sidebar-tool-compact' : ''}`}
-      >
-        <span className="truncate">{tool.name}</span>
-      </a>
-      <button
-        type="button"
-        onClick={() => toggleFavorite(tool.id)}
-        aria-label={isFavorite(tool.id) ? `Remove ${tool.name} from favorites` : `Add ${tool.name} to favorites`}
-        className={`favorite-toggle ${isFavorite(tool.id) ? 'favorite-toggle-active' : ''}`}
-        title={isFavorite(tool.id) ? 'Remove from favorites' : 'Add to favorites'}
-      >
-        <Star className={`size-3.5 ${isFavorite(tool.id) ? 'fill-current' : ''}`} />
-      </button>
-    </div>
+  const renderNavItem = (tool: ToolRegistryItem, compact = false) => (
+    <NavItem key={tool.id} tool={tool} compact={compact} active={activeTool === tool.id}
+      favorite={isFavorite(tool.id)} onSelect={handleSelectTool} onToggleFavorite={toggleFavorite} />
   )
 
   return (
@@ -163,7 +180,7 @@ export function Sidebar() {
                 Favorites
               </div>
               <div className="mt-1.5 space-y-0.5">
-                {favoriteTools.map((tool) => <NavItem key={tool.id} tool={tool} compact />)}
+                {favoriteTools.map((tool) => renderNavItem(tool, true))}
               </div>
             </section>
           )}
@@ -177,7 +194,7 @@ export function Sidebar() {
                   {group.label}
                 </div>
                 <div className="mt-1.5 space-y-0.5">
-                  {group.tools.map((tool) => <NavItem key={tool.id} tool={tool} />)}
+                  {group.tools.map((tool) => renderNavItem(tool))}
                 </div>
               </section>
             )
@@ -212,20 +229,14 @@ export function Sidebar() {
                   <button
                     type="button"
                     onClick={() => { setShowSearch(false); setSearchQuery('') }}
+                    aria-label="ปิดการค้นหา"
                     className="rounded-lg p-1.5 text-[#91a0be] hover:bg-[#1c2a45] hover:text-white"
                   >
                     <X className="size-5" />
                   </button>
                 </div>
                 <div className="max-h-[min(24rem,60vh)] overflow-y-auto p-2">
-                  {tools
-                    .filter(
-                      (t) =>
-                        !searchQuery ||
-                        t.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                        t.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                        t.keywords?.some((k) => k.includes(searchQuery.toLowerCase()))
-                    )
+                  {filteredTools
                     .map((tool) => (
                       <button
                         key={tool.id}
@@ -238,12 +249,7 @@ export function Sidebar() {
                         </div>
                       </button>
                     ))}
-                  {tools.filter(
-                    (t) =>
-                      !searchQuery ||
-                      t.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                      t.description?.toLowerCase().includes(searchQuery.toLowerCase())
-                  ).length === 0 && (
+                  {filteredTools.length === 0 && (
                     <div className="p-6 text-center text-sm text-[#8b9bbb]">ไม่พบเครื่องมือที่ตรงกับคำค้นหา</div>
                   )}
                 </div>
